@@ -12,7 +12,7 @@ A responsive dark football dashboard for the UEFA Champions League and Europe's 
 
 The serverless endpoint `api/football.js` uses a validated multi-source fallback strategy:
 
-1. **ESPN public data endpoints** — primary source for scoreboards, standings and available league leaderboards. Past events still marked pre-game are rejected instead of being shown as upcoming. These endpoints are undocumented and can change without notice.
+1. **ESPN public data endpoints** — primary source for scoreboards, standings and available league leaderboards. Scoreboard fixtures are fetched by calendar month and merged because ESPN's former `dates=YYYYMMDD-YYYYMMDD` range form now returns HTTP 400 in current observations. Past events still marked pre-game are rejected instead of being shown as upcoming. These endpoints are undocumented and can change without notice.
 2. **API-Football** — optional second source when `API_FOOTBALL_KEY` is configured. This is tried before static fixtures because it can provide current fixture status and scores. The Free plan may reject the current season; the backend records the failure and does not silently request an older season.
 3. **OpenFootball / football.json** — final fallback for domestic-league fixtures and results. Past fixtures without a published final score are omitted, and unknown kick-off times are shown as TBC. Its datasets are public domain (CC0); coverage and update timing depend on upstream contributions.
 
