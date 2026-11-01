@@ -8,7 +8,7 @@ Premium dark football dashboard for the UEFA Champions League and Europe's top f
 - Football-data.org API v4
 
 ## Deploy
-Import this repository into Vercel. Choose the Other framework preset. No build command is required; use the repository root as the output directory.
+Import this repository into Vercel. Choose the Vite framework preset. Build command: `npm run build`. Output directory: `dist`.
 
 ## Connect live football data
 1. Register for an API token at https://www.football-data.org/client/register
