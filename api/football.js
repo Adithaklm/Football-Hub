@@ -1,110 +1,15 @@
-const LEAGUES = { CL: 2, PL: 39, PD: 140, BL1: 78, SA: 135, FL1: 61 };
-const RESOURCES = new Set(['matches', 'standings', 'scorers', 'assists', 'yellowcards', 'redcards']);
-
-function seasonNow() {
-  const d = new Date();
-  return d.getUTCMonth() >= 6 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;
-}
-function mapStatus(short) {
-  if (['FT', 'AET', 'PEN'].includes(short)) return 'FINISHED';
-  if (['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE'].includes(short)) return 'IN_PLAY';
-  if (short === 'PST') return 'POSTPONED';
-  if (short === 'CANC') return 'CANCELLED';
-  return 'SCHEDULED';
-}
-function normalize(resource, rows, leagueName) {
-  if (resource === 'matches') return {
-    matches: rows.map(x => ({
-      id: x.fixture.id,
-      utcDate: x.fixture.date,
-      status: mapStatus(x.fixture.status.short),
-      matchday: x.league.round,
-      competition: { name: leagueName },
-      homeTeam: { id: x.teams.home.id, name: x.teams.home.name, shortName: x.teams.home.name, crest: x.teams.home.logo },
-      awayTeam: { id: x.teams.away.id, name: x.teams.away.name, shortName: x.teams.away.name, crest: x.teams.away.logo },
-      score: { fullTime: { home: x.goals.home, away: x.goals.away } }
-    }))
-  };
-  if (resource === 'standings') {
-    const rowsTable = rows[0]?.league?.standings?.[0] || [];
-    return { standings: [{ table: rowsTable.map(x => ({
-      position: x.rank,
-      team: { id: x.team.id, name: x.team.name, shortName: x.team.name, crest: x.team.logo },
-      playedGames: x.all.played, won: x.all.win, draw: x.all.draw, lost: x.all.lose,
-      goalsFor: x.all.goals.for, goalsAgainst: x.all.goals.against,
-      goalDifference: x.goalsDiff, points: x.points
-    })) }] };
-  }
-  return { scorers: rows.map(x => {
-    const s = x.statistics?.[0] || {};
-    return {
-      player: { id: x.player.id, name: x.player.name, photo: x.player.photo },
-      team: { id: s.team?.id, name: s.team?.name, crest: s.team?.logo },
-      goals: s.goals?.total ?? 0,
-      assists: s.goals?.assists ?? 0,
-      yellowCards: s.cards?.yellow ?? 0,
-      redCards: s.cards?.red ?? 0,
-      appearances: s.games?.appearences ?? s.games?.appearances ?? 0
-    };
-  }) };
-}
-
-export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
-
-  const apiKey = process.env.API_FOOTBALL_KEY;
-  if (!apiKey) return res.status(503).json({
-    error: 'Football API key is not connected. Add API_FOOTBALL_KEY in Vercel → Settings → Environment Variables.'
-  });
-
-  const { competition, resource } = req.query || {};
-  const league = LEAGUES[competition];
-  if (!league || !RESOURCES.has(resource)) return res.status(400).json({ error: 'Unsupported competition or resource.' });
-
-  const season = seasonNow();
-  const params = new URLSearchParams({ league: String(league), season: String(season) });
-  let endpoint;
-  let ttl = 21600;
-
-  if (resource === 'matches') {
-    endpoint = 'fixtures';
-    const from = new Date(); from.setUTCDate(from.getUTCDate() - 7);
-    const to = new Date(); to.setUTCDate(to.getUTCDate() + 14);
-    params.set('from', from.toISOString().slice(0, 10));
-    params.set('to', to.toISOString().slice(0, 10));
-    ttl = 600;
-  } else if (resource === 'standings') {
-    endpoint = 'standings';
-    ttl = 3600;
-  } else {
-    endpoint = ({
-      scorers: 'players/topscorers',
-      assists: 'players/topassists',
-      yellowcards: 'players/topyellowcards',
-      redcards: 'players/topredcards'
-    })[resource];
-  }
-
-  try {
-    const response = await fetch('https://v3.football.api-sports.io/' + endpoint + '?' + params.toString(), {
-      headers: { 'x-apisports-key': apiKey }
-    });
-    const body = await response.json();
-    if (!response.ok || (body.errors && Object.keys(body.errors).length)) {
-      return res.status(response.status || 502).json({
-        error: body.errors?.token || body.errors?.requests || body.errors?.plan || body.message || 'Football data provider error',
-        details: body.errors || undefined
-      });
-    }
-    const rows = body.response || [];
-    const result = normalize(resource, rows, competition);
-    res.setHeader('Cache-Control', 's-maxage=' + ttl + ', stale-while-revalidate=' + (ttl * 2));
-    if (body.paging) res.setHeader('X-Data-Paging', JSON.stringify(body.paging));
-    return res.status(200).json(result);
-  } catch (error) {
-    return res.status(502).json({ error: 'Unable to reach API-Football.' });
-  }
-}
+const LEAGUES={CL:{espn:'uefa.champions',open:null,name:'UEFA Champions League'},PL:{espn:'eng.1',open:'en.1',name:'Premier League'},PD:{espn:'esp.1',open:'es.1',name:'La Liga'},BL1:{espn:'ger.1',open:'de.1',name:'Bundesliga'},SA:{espn:'ita.1',open:'it.1',name:'Serie A'},FL1:{espn:'fra.1',open:'fr.1',name:'Ligue 1'}};
+const RESOURCES=new Set(['matches','standings','scorers','assists','yellowcards','redcards']);
+const TTL={matches:300,standings:1800,scorers:21600,assists:21600,yellowcards:21600,redcards:21600};
+async function json(url,headers={}){const r=await fetch(url,{headers:{'User-Agent':'FootballHub/1.0',...headers}});if(!r.ok)throw Error('HTTP '+r.status);return r.json();}
+const status=e=>{const s=e.competitions?.[0]?.status?.type?.state||e.status?.type?.state;return s==='post'?'FINISHED':s==='in'?'IN_PLAY':'SCHEDULED';};
+function espnMatches(b,c){return (b.events||[]).map(e=>{const x=e.competitions?.[0]||{},a=x.competitors||[],h=a.find(t=>t.homeAway==='home')||a[0]||{},v=a.find(t=>t.homeAway==='away')||a[1]||{},done=status(e)==='FINISHED';return{id:e.id,utcDate:e.date||x.date,status:status(e),matchday:e.week?.number||'',competition:{name:c.name},homeTeam:{id:h.team?.id,name:h.team?.displayName||h.team?.name,shortName:h.team?.shortDisplayName||h.team?.abbreviation,crest:h.team?.logo},awayTeam:{id:v.team?.id,name:v.team?.displayName||v.team?.name,shortName:v.team?.shortDisplayName||v.team?.abbreviation,crest:v.team?.logo},score:{fullTime:{home:done?Number(h.score||0):null,away:done?Number(v.score||0):null}}};});}
+function openMatches(b,c){return(b.matches||[]).map((m,i)=>{const s=m.score?.ft,ok=Array.isArray(s)&&s.length===2;return{id:'open-'+i,utcDate:m.date+'T'+(m.time||'12:00')+':00Z',status:ok?'FINISHED':'SCHEDULED',matchday:m.round||'',competition:{name:c.name},homeTeam:{name:m.team1,shortName:m.team1},awayTeam:{name:m.team2,shortName:m.team2},score:{fullTime:{home:ok?s[0]:null,away:ok?s[1]:null}}};});}
+function stat(stats,...names){for(const n of names){const x=(stats||[]).find(y=>y.name===n||y.abbreviation===n);if(x)return Number(x.value??x.displayValue??0);}return 0;}
+function espnTable(b){let entries=[];function walk(n){if(!n||typeof n!=='object')return;if(Array.isArray(n.entries))entries.push(...n.entries);if(Array.isArray(n.children))n.children.forEach(walk);if(n.standings)walk(n.standings);if(n.groups)walk(n.groups);}walk(b);const seen=new Set();const table=entries.filter(e=>{const id=e.team?.id||e.team?.displayName;if(!id||seen.has(id))return false;seen.add(id);return true;}).map((e,i)=>{const s=e.stats||[],t=e.team||{},gf=stat(s,'pointsFor','goalsFor','GF'),ga=stat(s,'pointsAgainst','goalsAgainst','GA');return{position:stat(s,'rank','playoffSeed')||i+1,team:{id:t.id,name:t.displayName||t.name,shortName:t.shortDisplayName||t.abbreviation,crest:t.logos?.[0]?.href||t.logo},playedGames:stat(s,'gamesPlayed','played'),won:stat(s,'wins','win'),draw:stat(s,'ties','draws','draw'),lost:stat(s,'losses','loss'),goalsFor:gf,goalsAgainst:ga,goalDifference:stat(s,'pointDifferential','goalDifference','GD')||gf-ga,points:stat(s,'points','leaguePoints','PTS')};});return{standings:[{table}]};}
+async function espn(c,r){if(r==='matches'){const a=new Date();a.setUTCDate(a.getUTCDate()-7);const z=new Date();z.setUTCDate(z.getUTCDate()+14);const fmt=d=>d.toISOString().slice(0,10).replaceAll('-','');const b=await json('https://site.api.espn.com/apis/site/v2/sports/soccer/'+c.espn+'/scoreboard?dates='+fmt(a)+'-'+fmt(z)+'&limit=100');const matches=espnMatches(b,c);if(!matches.length)throw Error('No matches returned');return{matches,source:'ESPN'};}
+if(r==='standings'){const b=await json('https://site.api.espn.com/apis/v2/sports/soccer/'+c.espn+'/standings');const x=espnTable(b);if(!x.standings[0].table.length)throw Error('No standings returned');return{...x,source:'ESPN'};}
+const cat=r==='scorers'?'goals':r==='yellowcards'?'yellowCards':r==='redcards'?'redCards':'assists';const b=await json('https://sports.core.api.espn.com/v2/sports/soccer/leagues/'+c.espn+'/leaders');const groups=b.categories||[];const g=groups.find(x=>String(x.name||x.abbreviation||'').toLowerCase()===cat.toLowerCase()||String(x.displayName||'').toLowerCase().includes(cat==='goals'?'goal':cat==='yellowCards'?'yellow':cat==='redCards'?'red':'assist'));if(!g)throw Error('No '+cat+' leaderboard');const scorers=await Promise.all((g.leaders||[]).slice(0,20).map(async(it,i)=>{const p=it.$ref?await json(it.$ref):it;let a=p.athlete,t=p.team;if(a?.$ref)a=await json(a.$ref);if(typeof a==='string')a=await json(a);if(t?.$ref)t=await json(t.$ref);if(typeof t==='string')t=await json(t);return{player:{id:a?.id||i,name:a?.displayName||a?.fullName||a?.name||'Player'},team:{name:t?.displayName||t?.name||'—'},goals:cat==='goals'?Number(p.value||0):0,assists:cat==='assists'?Number(p.value||0):0,yellowCards:cat==='yellowCards'?Number(p.value||0):0,redCards:cat==='redCards'?Number(p.value||0):0};}));if(!scorers.length)throw Error('No leaderboard rows');return{scorers,source:'ESPN'};}
+async function openFootball(c){if(!c.open)throw Error('No open dataset');const y=new Date().getUTCMonth()>=6?new Date().getUTCFullYear():new Date().getUTCFullYear()-1,s=y+'-'+String((y+1)%100).padStart(2,'0');const b=await json('https://raw.githubusercontent.com/openfootball/football.json/master/'+s+'/'+c.open+'.json');return{matches:openMatches(b,c),source:'OpenFootball'};}
+async function apiSports(c,code,r){if(!process.env.API_FOOTBALL_KEY)throw Error('API-Football key not set');const ids={CL:2,PL:39,PD:140,BL1:78,SA:135,FL1:61},y=new Date().getUTCMonth()>=6?new Date().getUTCFullYear():new Date().getUTCFullYear()-1;const ep=r==='matches'?'fixtures':r==='standings'?'standings':({scorers:'players/topscorers',assists:'players/topassists',yellowcards:'players/topyellowcards',redcards:'players/topredcards'})[r];const u=new URL('https://v3.football.api-sports.io/'+ep);u.searchParams.set('league',ids[code]);u.searchParams.set('season',y);if(r==='matches'){const a=new Date();a.setUTCDate(a.getUTCDate()-7);const z=new Date();z.setUTCDate(z.getUTCDate()+14);u.searchParams.set('from',a.toISOString().slice(0,10));u.searchParams.set('to',z.toISOString().slice(0,10));}const b=await json(u.toString(),{'x-apisports-key':process.env.API_FOOTBALL_KEY});if(b.errors&&Object.keys(b.errors).length)throw Error(JSON.stringify(b.errors));const rows=b.response||[];if(r==='matches')return{matches:rows.map(x=>({id:x.fixture.id,utcDate:x.fixture.date,status:['FT','AET','PEN'].includes(x.fixture.status.short)?'FINISHED':['1H','2H','HT','ET','LIVE'].includes(x.fixture.status.short)?'IN_PLAY':'SCHEDULED',competition:{name:c.name},homeTeam:{name:x.teams.home.name,shortName:x.teams.home.name,crest:x.teams.home.logo},awayTeam:{name:x.teams.away.name,shortName:x.teams.away.name,crest:x.teams.away.logo},score:{fullTime:{home:x.goals.home,away:x.goals.away}}})),source:'API-Football'};if(r==='standings')return{standings:[{table:(rows[0]?.league?.standings?.[0]||[]).map(x=>({position:x.rank,team:{name:x.team.name,shortName:x.team.name,crest:x.team.logo},playedGames:x.all.played,won:x.all.win,draw:x.all.draw,lost:x.all.lose,goalsFor:x.all.goals.for,goalsAgainst:x.all.goals.against,goalDifference:x.goalsDiff,points:x.points}))}],source:'API-Football'};return{scorers:rows.map(x=>{const s=x.statistics?.[0]||{};return{player:{id:x.player.id,name:x.player.name},team:{name:s.team?.name||'—'},goals:s.goals?.total||0,assists:s.goals?.assists||0,yellowCards:s.cards?.yellow||0,redCards:s.cards?.red||0};}),source:'API-Football'};}
+export default async function handler(req,res){res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Access-Control-Allow-Methods','GET, OPTIONS');if(req.method==='OPTIONS')return res.status(204).end();if(req.method!=='GET')return res.status(405).json({error:'Method not allowed'});const{competition:code,resource}=req.query||{},c=LEAGUES[code];if(!c||!RESOURCES.has(resource))return res.status(400).json({error:'Unsupported competition or resource.'});const errors=[];let result=null;try{try{result=await espn(c,resource);}catch(e){errors.push('ESPN: '+e.message);}if(!result&&resource==='matches'){try{result=await openFootball(c);}catch(e){errors.push('OpenFootball: '+e.message);}}if(!result){try{result=await apiSports(c,code,resource);const count=result.matches?.length??result.standings?.[0]?.table?.length??result.scorers?.length??0;if(!count)result=null;}catch(e){errors.push('API-Football: '+e.message);}}if(!result){const empty=resource==='matches'?{matches:[]}:resource==='standings'?{standings:[{table:[]}]}:{scorers:[]};result={...empty,source:'none',unavailable:'No compatible data was returned by available sources.',diagnostics:errors};}res.setHeader('Cache-Control','s-maxage='+TTL[resource]+', stale-while-revalidate='+(TTL[resource]*2));return res.status(200).json(result);}catch(e){return res.status(502).json({error:'Football data sources could not be reached.',details:e.message});}}
