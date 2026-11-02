@@ -83,7 +83,7 @@ async function bundesliga(resource){
   if(resource==='standings'){
     const b=await json('https://api.openligadb.de/getbltable/bl1/'+y);
     if(!Array.isArray(b)||!b.length)throw Error('OpenLigaDB returned no Bundesliga table');
-    return{standings:[{table:b.map(t=>({position:Number(t platz||t. Platz)||0,team:{name:t.teamName,shortName:t.shortName||t.teamName,crest:t.teamIconUrl},playedGames:Number(t.matches)||0,won:Number(t.won)||0,draw:Number(t.draw)||0,lost:Number(t.lost)||0,goalsFor:Number(t.goals)||0,goalsAgainst:Number(t.opponentGoals)||0,goalDifference:Number(t.goalDiff)||0,points:Number(t.points)||0}))}],source:'OpenLigaDB'};
+    return{standings:[{table:b.map(t=>({position:Number(t.position||t. Platz)||0,team:{name:t.teamName,shortName:t.shortName||t.teamName,crest:t.teamIconUrl},playedGames:Number(t.matches)||0,won:Number(t.won)||0,draw:Number(t.draw)||0,lost:Number(t.lost)||0,goalsFor:Number(t.goals)||0,goalsAgainst:Number(t.opponentGoals)||0,goalDifference:Number(t.goalDiff)||0,points:Number(t.points)||0}))}],source:'OpenLigaDB'};
   }
   const b=await json('https://api.openligadb.de/getmatchdata/bl1/'+y);
   const from=new Date();from.setUTCDate(from.getUTCDate()-7);const to=new Date();to.setUTCDate(to.getUTCDate()+14);
