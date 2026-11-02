@@ -59,7 +59,18 @@ async function laLiga(resource){
   const players=pages.flatMap(b=>b.player_stats||[]);
   const statName=resource==='scorers'?'goals':resource==='assists'?'goal_assists':resource==='yellowcards'?'yellow_cards':'red_cards';
   const metric=resource==='scorers'?'goals':resource==='assists'?'assists':resource==='yellowcards'?'yellowCards':'redCards';
-  const rows=players.map(p=>({player:{id:p.opta_id||String(p.id),name:p.name||p.nickname||'Unknown'},team:{name:p.team?.nickname||p.team?.name||'—'},goals:resource==='scorers'?llNum(p.stats,statName):0,assists:resource==='assists'?llNum(p.stats,statName):0,yellowCards:resource==='yellowcards'?llNum(p.stats,statName):0,redCards:resource==='redcards'?llNum(p.stats,statName):0,_value:llNum(p.stats,statName)})).filter(p=>p._value>0).sort((a,b)=>b._value-a._value).slice(0,30).map(({_value,...p})=>p);
+  const ranked=players.map(p=>({_raw:p,_value:llNum(p.stats,statName)})).filter(x=>x._value>0).sort((a,b)=>b._value-a._value).slice(0,30);
+  const rows=await Promise.all(ranked.map(async({ _raw:p,_value })=>{
+    let profile={};
+    if(p.slug){try{const b=await laLigaGet('/api/v1/players/'+p.slug,key);profile=b.player||b||{};}catch(e){}}
+    const team=p.team||profile.team||{};
+    const opta=String(p.opta_id||profile.opta_id||'').replace(/^p/,'');
+    const teamOpta=String(team.opta_id||'').replace(/^t/,'');
+    const photo=profile.photos?.['001']?.['256x278']||profile.photos?.['001']?.['512x556']||
+      (opta&&teamOpta?'https://assets.laliga.com/squad/'+year+'/'+teamOpta+'/p'+opta+'/256x278/p'+opta+'_'+teamOpta+'_'+year+'_1_001_000.png':null);
+    const name=profile.name||[profile.firstname,profile.lastname].filter(Boolean).join(' ')||p.name||p.nickname||'Unknown';
+    return {player:{id:p.opta_id||String(p.id),name,photo},team:{name:team.nickname||team.name||'—'},goals:resource==='scorers'?_value:0,assists:resource==='assists'?_value:0,yellowCards:resource==='yellowcards'?_value:0,redCards:resource==='redcards'?_value:0};
+  }));
   if(!rows.length)throw Error('LaLiga returned no '+metric+' leaderboard rows');
   return {scorers:rows,source:'LaLiga official website',season:year};
 }
