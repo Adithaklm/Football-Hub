@@ -1,5 +1,5 @@
 const LEAGUES={CL:{espn:'uefa.champions',open:null,name:'UEFA Champions League'},PL:{espn:'eng.1',open:'en.1',name:'Premier League'},PD:{espn:'esp.1',open:'es.1',name:'La Liga'},BL1:{espn:'ger.1',open:'de.1',name:'Bundesliga'},SA:{espn:'ita.1',open:'it.1',name:'Serie A'},FL1:{espn:'fra.1',open:'fr.1',name:'Ligue 1'}};
-const RESOURCES=new Set(['matches','standings','scorers','assists','yellowcards','redcards']);
+const RESOURCES=new Set(['matches','standings','scorers','assists','yellowcards','redcards','shots','passes','interceptions','saves']);
 const TTL={matches:300,standings:1800,scorers:21600,assists:21600,yellowcards:21600,redcards:21600};
 async function json(url,headers={}){const r=await fetch(url,{headers:{'User-Agent':'FootballHub/1.0',...headers}});if(!r.ok)throw Error('HTTP '+r.status);return r.json();}
 const status=e=>{const s=e.competitions?.[0]?.status?.type?.state||e.status?.type?.state;if(s==='post')return'FINISHED';if(s==='in')return'IN_PLAY';const d=new Date(e.date||e.competitions?.[0]?.date||0);if(Number.isFinite(d.getTime())&&d.getTime()<Date.now()-6*60*60*1000)return'UNKNOWN';return'SCHEDULED';};
@@ -107,10 +107,9 @@ async function laLigaKey(){
   }catch(e){}
   return 'c13c3a8e2f6b46da9c5c425cf61fab3e';
 }
-function llNum(stats,name){
-  const v=(stats||[]).find(x=>x.name===name)?.stat;
-  const n=Number(v);
-  return Number.isFinite(n)?n:0;
+function llNum(stats,...names){
+  for(const name of names){const v=(stats||[]).find(x=>x.name===name)?.stat;const n=Number(v);if(Number.isFinite(n))return n;}
+  return 0;
 }
 async function laLiga(resource){
   const now=new Date(),year=now.getUTCMonth()>=6?now.getUTCFullYear():now.getUTCFullYear()-1;
@@ -134,9 +133,9 @@ async function laLiga(resource){
   }
   const pages=await Promise.all(Array.from({length:8},(_,i)=>laLigaGet('/api/v1/subscriptions/'+slug+'/players/stats?limit=100&offset='+(i*100),key)));
   const players=pages.flatMap(b=>b.player_stats||[]);
-  const statName=resource==='scorers'?'goals':resource==='assists'?'goal_assists':resource==='yellowcards'?'yellow_cards':'red_cards';
-  const metric=resource==='scorers'?'goals':resource==='assists'?'assists':resource==='yellowcards'?'yellowCards':'redCards';
-  const ranked=players.map(p=>({_raw:p,_value:llNum(p.stats,statName)})).filter(x=>x._value>0).sort((a,b)=>b._value-a._value).slice(0,30);
+  const statNames={scorers:['goals'],assists:['goal_assists'],yellowcards:['yellow_cards'],redcards:['red_cards'],shots:['total_shots','shots','shots_on_target_inc_goals'],passes:['total_passes','passes'],interceptions:['interceptions'],saves:['saves']};
+  const metric=resource;
+  const ranked=players.map(p=>({_raw:p,_value:llNum(p.stats,...statNames[resource])})).filter(x=>x._value>0).sort((a,b)=>b._value-a._value).slice(0,30);
   const rows=await Promise.all(ranked.map(async({ _raw:p,_value })=>{
     let profile={};
     if(p.slug){try{const b=await laLigaGet('/api/v1/players/'+p.slug,key);profile=b.player||b||{};}catch(e){}}
@@ -146,7 +145,7 @@ async function laLiga(resource){
     const photo=profile.photos?.['001']?.['256x278']||profile.photos?.['001']?.['512x556']||
       (opta&&teamOpta?'https://assets.laliga.com/squad/'+year+'/'+teamOpta+'/p'+opta+'/256x278/p'+opta+'_'+teamOpta+'_'+year+'_1_001_000.png':null);
     const name=profile.shirtName||profile.shirt_name||profile.knownName||profile.known_name||profile.nickname||profile.shortName||profile.short_name||p.shirtName||p.shirt_name||p.knownName||p.known_name||p.nickname||p.shortName||p.short_name||profile.name||[profile.firstname,profile.lastname].filter(Boolean).join(' ')||p.name||'Unknown';
-    return {player:{id:p.opta_id||String(p.id),name,photo},team:{name:team.nickname||team.name||'—'},goals:resource==='scorers'?_value:0,assists:resource==='assists'?_value:0,yellowCards:resource==='yellowcards'?_value:0,redCards:resource==='redcards'?_value:0};
+    return {player:{id:p.opta_id||String(p.id),name,photo},team:{name:team.nickname||team.name||'—'},goals:resource==='scorers'?_value:0,assists:resource==='assists'?_value:0,yellowCards:resource==='yellowcards'?_value:0,redCards:resource==='redcards'?_value:0,shots:resource==='shots'?_value:0,passes:resource==='passes'?_value:0,interceptions:resource==='interceptions'?_value:0,saves:resource==='saves'?_value:0};
   }));
   if(!rows.length)throw Error('LaLiga returned no '+metric+' leaderboard rows');
   return {scorers:rows,source:'LaLiga official website',season:year};
