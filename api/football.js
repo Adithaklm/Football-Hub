@@ -24,7 +24,7 @@ async function laLigaKey(){
     const r=await fetch('https://www.laliga.com/en-GB/laliga-easports/standing',{headers:{'User-Agent':'Mozilla/5.0 FootballHub/1.0'}});
     if(r.ok){
       const html=await r.text();
-      const m=html.match(/backendSubscription["']?\\s*[:=]\\s*["']([^"']+)["']/i);
+      const m=html.match(/backendSubscription["']?\s*[:=]\s*["']([^"']+)["']/i);
       if(m)return m[1];
     }
   }catch(e){}
