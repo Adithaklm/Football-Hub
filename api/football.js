@@ -39,7 +39,7 @@ async function premierLeague(resource){
   const key=resource==='scorers'?'goals':resource==='assists'?'goal_assists':resource==='yellowcards'?'yellow_cards':'red_cards';
   const b=await get('/api/v3/competitions/8/seasons/'+y+'/players/stats/leaderboard?_sort='+key+':desc&_limit=30');
   const rows=b.data||b.leaderboard||[];
-  const scorers=rows.map((r,i)=>{const p=r.playerMetadata||r.player||{},s=r.stats||{};const val=Number(s[key]??s[key.replace(/_([a-z])/g,(_,c)=>c.toUpperCase())]??0);return{player:{id:p.id||i,name:p.name||p.displayName||p.shortName||'Unknown',photo:p.photo||null},team:{name:p.team?.name||p.teamName||'—'},goals:resource==='scorers'?val:0,assists:resource==='assists'?val:0,yellowCards:resource==='yellowcards'?val:0,redCards:resource==='redcards'?val:0};}).filter(x=>x.goals+x.assists+x.yellowCards+x.redCards>0);
+  const scorers=rows.map((r,i)=>{const p=r.playerMetadata||r.player||{},s=r.stats||{};const val=Number(s[key]??s[key.replace(/_([a-z])/g,(_,c)=>c.toUpperCase())]??0);const shirtName=p.shirtName||p.shirt_name||p.knownName||p.known_name||p.nickname||p.shortName||p.short_name||p.displayName||p.name||'Unknown';return{player:{id:p.id||i,name:shirtName,photo:p.photo||null},team:{name:p.team?.name||p.teamName||'—'},goals:resource==='scorers'?val:0,assists:resource==='assists'?val:0,yellowCards:resource==='yellowcards'?val:0,redCards:resource==='redcards'?val:0};}).filter(x=>x.goals+x.assists+x.yellowCards+x.redCards>0);
   if(!scorers.length)throw Error('Premier League returned no '+resource+' statistics');
   return{scorers,source:'Premier League official website',season:y};
 }
@@ -75,7 +75,7 @@ async function serieA(resource){
   const ids=statIds[resource]||[];
   const rows=players.map((p,i)=>{const stats=p.stats||[];const v=stats.find(s=>ids.includes(s.statsId));return{p,i,value:Number(v?.statsValue)||0};}).filter(x=>x.value>0).sort((a,b)=>b.value-a.value).slice(0,30);
   if(!rows.length)throw Error('Serie A returned no '+resource+' leaderboard');
-  return{scorers:rows.map(({p,i,value})=>{const n=p.displayName||[p.mediaFirstName,p.mediaLastName].filter(Boolean).join(' ')||p.shortName||p.shirtName||'Unknown';const photo=p.imagery?.playerImage_home||p.imagery?.playerImage_home_celeb;return{player:{id:p.id||i,name:n,photo:photo?(photo.startsWith('http')?photo:'https://media-sdp.legaseriea.it/'+photo):null},team:{name:p.team?.displayName||p.team?.name||'—'},goals:resource==='scorers'?value:0,assists:resource==='assists'?value:0,yellowCards:resource==='yellowcards'?value:0,redCards:resource==='redcards'?value:0};}),source:'Lega Serie A official website',season:y};
+  return{scorers:rows.map(({p,i,value})=>{const n=p.shirtName||p.shirt_name||p.knownName||p.known_name||p.nickname||p.shortName||p.short_name||p.displayName||p.name||[p.mediaFirstName,p.mediaLastName].filter(Boolean).join(' ')||'Unknown';const photo=p.imagery?.playerImage_home||p.imagery?.playerImage_home_celeb;return{player:{id:p.id||i,name:n,photo:photo?(photo.startsWith('http')?photo:'https://media-sdp.legaseriea.it/'+photo):null},team:{name:p.team?.displayName||p.team?.name||'—'},goals:resource==='scorers'?value:0,assists:resource==='assists'?value:0,yellowCards:resource==='yellowcards'?value:0,redCards:resource==='redcards'?value:0};}),source:'Lega Serie A official website',season:y};
 }
 async function bundesliga(resource){
   const y=new Date().getUTCMonth()>=6?new Date().getUTCFullYear():new Date().getUTCFullYear()-1;
@@ -145,7 +145,7 @@ async function laLiga(resource){
     const teamOpta=String(team.opta_id||'').replace(/^t/,'');
     const photo=profile.photos?.['001']?.['256x278']||profile.photos?.['001']?.['512x556']||
       (opta&&teamOpta?'https://assets.laliga.com/squad/'+year+'/'+teamOpta+'/p'+opta+'/256x278/p'+opta+'_'+teamOpta+'_'+year+'_1_001_000.png':null);
-    const name=profile.name||[profile.firstname,profile.lastname].filter(Boolean).join(' ')||p.name||p.nickname||'Unknown';
+    const name=profile.shirtName||profile.shirt_name||profile.knownName||profile.known_name||profile.nickname||profile.shortName||profile.short_name||p.shirtName||p.shirt_name||p.knownName||p.known_name||p.nickname||p.shortName||p.short_name||profile.name||[profile.firstname,profile.lastname].filter(Boolean).join(' ')||p.name||'Unknown';
     return {player:{id:p.opta_id||String(p.id),name,photo},team:{name:team.nickname||team.name||'—'},goals:resource==='scorers'?_value:0,assists:resource==='assists'?_value:0,yellowCards:resource==='yellowcards'?_value:0,redCards:resource==='redcards'?_value:0};
   }));
   if(!rows.length)throw Error('LaLiga returned no '+metric+' leaderboard rows');
