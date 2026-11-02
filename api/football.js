@@ -14,6 +14,83 @@ function openTable(b){const map=new Map();for(const m of b.matches||[]){const ft
 async function openFootball(c,resource){if(!c.open)throw Error('No open dataset');const y=new Date().getUTCMonth()>=6?new Date().getUTCFullYear():new Date().getUTCFullYear()-1,s=y+'-'+String((y+1)%100).padStart(2,'0');const b=await json('https://raw.githubusercontent.com/openfootball/football.json/master/'+s+'/'+c.open+'.json');if(resource==='standings'){const table=openTable(b);if(!table.standings[0].table.length)throw Error('No completed matches to calculate a table');return{...table,source:'OpenFootball (calculated from published results)'};}const matches=openMatches(b,c);const from=new Date();from.setUTCDate(from.getUTCDate()-7);const to=new Date();to.setUTCDate(to.getUTCDate()+14);const selected=matches.filter(m=>{const d=new Date(m.utcDate);return Number.isFinite(d.getTime())&&d>=from&&d<=to;});if(!selected.length)throw Error('No valid current fixtures/results in the published dataset');return{matches:selected,source:'OpenFootball',dataNote:'Past fixtures without a published final score are omitted. Kick-off time may be unavailable.'};}
 async function apiSports(c,code,r){if(!process.env.API_FOOTBALL_KEY)throw Error('API-Football key not set');const ids={CL:2,PL:39,PD:140,BL1:78,SA:135,FL1:61},y=new Date().getUTCMonth()>=6?new Date().getUTCFullYear():new Date().getUTCFullYear()-1;const ep=r==='matches'?'fixtures':r==='standings'?'standings':({scorers:'players/topscorers',assists:'players/topassists',yellowcards:'players/topyellowcards',redcards:'players/topredcards'})[r];const u=new URL('https://v3.football.api-sports.io/'+ep);u.searchParams.set('league',ids[code]);u.searchParams.set('season',y);if(r==='matches'){const a=new Date();a.setUTCDate(a.getUTCDate()-7);const z=new Date();z.setUTCDate(z.getUTCDate()+14);u.searchParams.set('from',a.toISOString().slice(0,10));u.searchParams.set('to',z.toISOString().slice(0,10));}const b=await json(u.toString(),{'x-apisports-key':process.env.API_FOOTBALL_KEY});if(b.errors&&Object.keys(b.errors).length)throw Error(JSON.stringify(b.errors));const rows=b.response||[];if(r==='matches')return{matches:rows.map(x=>({id:x.fixture.id,utcDate:x.fixture.date,status:['FT','AET','PEN'].includes(x.fixture.status.short)?'FINISHED':['1H','2H','HT','ET','LIVE'].includes(x.fixture.status.short)?'IN_PLAY':'SCHEDULED',competition:{name:c.name},homeTeam:{name:x.teams.home.name,shortName:x.teams.home.name,crest:x.teams.home.logo},awayTeam:{name:x.teams.away.name,shortName:x.teams.away.name,crest:x.teams.away.logo},score:{fullTime:{home:x.goals.home,away:x.goals.away}}})),source:'API-Football'};if(r==='standings')return{standings:[{table:(rows[0]?.league?.standings?.[0]||[]).map(x=>({position:x.rank,team:{name:x.team.name,shortName:x.team.name,crest:x.team.logo},playedGames:x.all.played,won:x.all.win,draw:x.all.draw,lost:x.all.lose,goalsFor:x.all.goals.for,goalsAgainst:x.all.goals.against,goalDifference:x.goalsDiff,points:x.points}))}],source:'API-Football'};return{scorers:rows.map(x=>{const s=x.statistics?.[0]||{};return{player:{id:x.player.id,name:x.player.name},team:{name:s.team?.name||'—'},goals:s.goals?.total||0,assists:s.goals?.assists||0,yellowCards:s.cards?.yellow||0,redCards:s.cards?.red||0};}),source:'API-Football'};}
 
+
+const PL_BASE='https://sdp-prem-prod.premier-league-prod.pulselive.com';
+async function premierLeague(resource){
+  const y=new Date().getUTCMonth()>=6?new Date().getUTCFullYear():new Date().getUTCFullYear()-1;
+  const headers={'User-Agent':'Mozilla/5.0 FootballHub/1.0','accept':'application/json'};
+  const get=path=>json(PL_BASE+path,headers);
+  if(resource==='standings'){
+    const b=await get('/api/v5/competitions/8/seasons/'+y+'/standings?live=false');
+    const entries=(b.tables||[]).flatMap(t=>t.entries||[]);
+    if(!entries.length)throw Error('Premier League returned no standings');
+    return {standings:[{table:entries.map(e=>{const s=e.overall||e.stats||{},t=e.team||{};return{position:Number(s.position)||0,team:{id:t.id,name:t.name||t.shortName,shortName:t.shortName||t.abbr,crest:t.badge||null},playedGames:Number(s.played)||0,won:Number(s.won)||0,draw:Number(s.drawn)||0,lost:Number(s.lost)||0,goalsFor:Number(s.goalsFor)||0,goalsAgainst:Number(s.goalsAgainst)||0,goalDifference:Number(s.goalsFor||0)-Number(s.goalsAgainst||0),points:Number(s.points)||0};})}],source:'Premier League official website',season:y};
+  }
+  if(resource==='matches'){
+    const b=await get('/api/v2/matches?competition=8&season='+y+'&_limit=300&_sort=kickoff:asc');
+    const all=b.data||b.matches||[];
+    const from=new Date();from.setUTCDate(from.getUTCDate()-7);const to=new Date();to.setUTCDate(to.getUTCDate()+14);
+    const matches=all.filter(m=>m.kickoff&&new Date(m.kickoff)>=from&&new Date(m.kickoff)<=to).map(m=>{
+      const period=String(m.period||'').toLowerCase(),done=['fulltime','finished','postmatch'].includes(period),live=period==='live';
+      return{id:String(m.matchId||m.id),utcDate:m.kickoff,status:done?'FINISHED':live?'IN_PLAY':'SCHEDULED',matchday:m.matchWeek||'',competition:{name:'Premier League'},homeTeam:{id:m.homeTeam?.id,name:m.homeTeam?.name,shortName:m.homeTeam?.shortName,crest:m.homeTeam?.badge||null},awayTeam:{id:m.awayTeam?.id,name:m.awayTeam?.name,shortName:m.awayTeam?.shortName,crest:m.awayTeam?.badge||null},score:{fullTime:{home:done||live?Number(m.homeTeam?.score??0):null,away:done||live?Number(m.awayTeam?.score??0):null}}};
+    });
+    return{matches,source:'Premier League official website',season:y};
+  }
+  const key=resource==='scorers'?'goals':resource==='assists'?'goal_assists':resource==='yellowcards'?'yellow_cards':'red_cards';
+  const b=await get('/api/v3/competitions/8/seasons/'+y+'/players/stats/leaderboard?_sort='+key+':desc&_limit=30');
+  const rows=b.data||b.leaderboard||[];
+  const scorers=rows.map((r,i)=>{const p=r.playerMetadata||r.player||{},s=r.stats||{};const val=Number(s[key]??s[key.replace(/_([a-z])/g,(_,c)=>c.toUpperCase())]??0);return{player:{id:p.id||i,name:p.name||p.displayName||p.shortName||'Unknown',photo:p.photo||null},team:{name:p.team?.name||p.teamName||'—'},goals:resource==='scorers'?val:0,assists:resource==='assists'?val:0,yellowCards:resource==='yellowcards'?val:0,redCards:resource==='redcards'?val:0};}).filter(x=>x.goals+x.assists+x.yellowCards+x.redCards>0);
+  if(!scorers.length)throw Error('Premier League returned no '+resource+' statistics');
+  return{scorers,source:'Premier League official website',season:y};
+}
+const SERIE_BASE='https://api-sdp.legaseriea.it/v1/serie-a/football';
+const enc=encodeURIComponent;
+async function serieA(resource){
+  const y=new Date().getUTCMonth()>=6?new Date().getUTCFullYear():new Date().getUTCFullYear()-1;
+  const headers={'User-Agent':'Mozilla/5.0 FootballHub/1.0','accept':'application/json'};
+  const get=path=>json(SERIE_BASE+path,headers);
+  const comp='serie-a::Football_Competition::ec93b94f74294dc98ab5bcfd67fc0d88';
+  const seasons=await get('/competitions/'+enc(comp)+'/seasons?locale=en-GB');
+  const list=seasons.seasons||seasons.data||[];
+  const season=list.find(s=>String(s.seasonName||'').startsWith(String(y)))||list[0];
+  if(!season)throw Error('Serie A season metadata unavailable');
+  const sid=season.seasonId||season.id;
+  if(resource==='standings'){
+    const b=await get('/seasons/'+enc(sid)+'/standings/overall?locale=en-GB');
+    const teams=b.standings?.[0]?.teams||[];
+    if(!teams.length)throw Error('Serie A returned no standings');
+    const read=(a,...keys)=>{for(const k of keys){const v=a.find(x=>x.statsId===k);if(v)return Number(v.statsValue)||0;}return 0;};
+    return{standings:[{table:teams.map((e,i)=>{const s=e.stats||[],t=e.team||e;return{position:read(s,'rank')||i+1,team:{id:t.id||e.teamId,name:t.displayName||t.name||e.displayName,shortName:t.shortName||t.displayName||t.name,crest:t.imagery?.teamLogo?('https://media-sdp.legaseriea.it/'+t.imagery.teamLogo):null},playedGames:read(s,'matches-played'),won:read(s,'win'),draw:read(s,'draw'),lost:read(s,'lose'),goalsFor:read(s,'goals-for'),goalsAgainst:read(s,'goals-against'),goalDifference:read(s,'goal-difference'),points:read(s,'points')};})}],source:'Lega Serie A official website',season:y};
+  }
+  if(resource==='matches'){
+    const b=await get('/seasons/'+enc(sid)+'/matches?locale=en-GB');
+    const all=b.matches||b.data||[];
+    const from=new Date();from.setUTCDate(from.getUTCDate()-7);const to=new Date();to.setUTCDate(to.getUTCDate()+14);
+    const matches=all.filter(m=>m.matchDateUtc&&new Date(m.matchDateUtc)>=from&&new Date(m.matchDateUtc)<=to).map(m=>{const done=String(m.status||'').toUpperCase()==='FINISHED',live=String(m.status||'').toUpperCase()==='LIVE';const team=(t)=>({id:t?.id,name:t?.displayName||t?.name,shortName:t?.shortName||t?.displayName||t?.name,crest:t?.imagery?.teamLogo?('https://media-sdp.legaseriea.it/'+t.imagery.teamLogo):null});return{id:String(m.id||m.matchId),utcDate:m.matchDateUtc,status:done?'FINISHED':live?'IN_PLAY':'SCHEDULED',matchday:m.matchSet?.providerId||'',competition:{name:'Serie A'},homeTeam:team(m.home),awayTeam:team(m.away),score:{fullTime:{home:done||live?Number(m.providerHomeScore??0):null,away:done||live?Number(m.providerAwayScore??0):null}}};});
+    return{matches,source:'Lega Serie A official website',season:y};
+  }
+  const pages=await Promise.all(Array.from({length:20},(_,i)=>get('/seasons/'+enc(sid)+'/stats/players?category=General&page='+(i+1)+'&locale=en-GB').catch(()=>null)));
+  const players=pages.flatMap(b=>b?.players||b?.data||[]);
+  const statIds={scorers:['goals'],assists:['assists','goal-assists','Goal Assists'],yellowcards:['yellow-cards'],redcards:['red-cards']};
+  const ids=statIds[resource]||[];
+  const rows=players.map((p,i)=>{const stats=p.stats||[];const v=stats.find(s=>ids.includes(s.statsId));return{p,i,value:Number(v?.statsValue)||0};}).filter(x=>x.value>0).sort((a,b)=>b.value-a.value).slice(0,30);
+  if(!rows.length)throw Error('Serie A returned no '+resource+' leaderboard');
+  return{scorers:rows.map(({p,i,value})=>{const n=p.displayName||[p.mediaFirstName,p.mediaLastName].filter(Boolean).join(' ')||p.shortName||p.shirtName||'Unknown';const photo=p.imagery?.playerImage_home||p.imagery?.playerImage_home_celeb;return{player:{id:p.id||i,name:n,photo:photo?(photo.startsWith('http')?photo:'https://media-sdp.legaseriea.it/'+photo):null},team:{name:p.team?.displayName||p.team?.name||'—'},goals:resource==='scorers'?value:0,assists:resource==='assists'?value:0,yellowCards:resource==='yellowcards'?value:0,redCards:resource==='redcards'?value:0};}),source:'Lega Serie A official website',season:y};
+}
+async function bundesliga(resource){
+  const y=new Date().getUTCMonth()>=6?new Date().getUTCFullYear():new Date().getUTCFullYear()-1;
+  if(!['matches','standings'].includes(resource))throw Error('Bundesliga player leaderboards are not yet available from the connected official/open source.');
+  if(resource==='standings'){
+    const b=await json('https://api.openligadb.de/getbltable/bl1/'+y);
+    if(!Array.isArray(b)||!b.length)throw Error('OpenLigaDB returned no Bundesliga table');
+    return{standings:[{table:b.map(t=>({position:Number(t platz||t. Platz)||0,team:{name:t.teamName,shortName:t.shortName||t.teamName,crest:t.teamIconUrl},playedGames:Number(t.matches)||0,won:Number(t.won)||0,draw:Number(t.draw)||0,lost:Number(t.lost)||0,goalsFor:Number(t.goals)||0,goalsAgainst:Number(t.opponentGoals)||0,goalDifference:Number(t.goalDiff)||0,points:Number(t.points)||0}))}],source:'OpenLigaDB'};
+  }
+  const b=await json('https://api.openligadb.de/getmatchdata/bl1/'+y);
+  const from=new Date();from.setUTCDate(from.getUTCDate()-7);const to=new Date();to.setUTCDate(to.getUTCDate()+14);
+  const matches=(b||[]).filter(m=>m.matchDateTimeUTC&&new Date(m.matchDateTimeUTC)>=from&&new Date(m.matchDateTimeUTC)<=to).map(m=>{const r=m.matchResults?.find(x=>x.resultTypeID===2)||m.matchResults?.[m.matchResults.length-1],done=!!r;return{id:String(m.matchID),utcDate:m.matchDateTimeUTC,status:done?'FINISHED':'SCHEDULED',matchday:m.group?.groupName||'',competition:{name:'Bundesliga'},homeTeam:{id:m.team1?.teamId,name:m.team1?.teamName,shortName:m.team1?.shortName,crest:m.team1?.teamIconUrl},awayTeam:{id:m.team2?.teamId,name:m.team2?.teamName,shortName:m.team2?.shortName,crest:m.team2?.teamIconUrl},score:{fullTime:{home:done?Number(r.pointsTeam1):null,away:done?Number(r.pointsTeam2):null}}};});
+  return{matches,source:'OpenLigaDB'};
+}
+
 async function laLigaGet(path,key){
   const r=await fetch('https://apim.laliga.com/public-service'+path,{headers:{'Ocp-Apim-Subscription-Key':key,accept:'application/json','User-Agent':'FootballHub/1.0'}});
   if(!r.ok)throw Error('LaLiga API HTTP '+r.status+' for '+path);
@@ -75,4 +152,28 @@ async function laLiga(resource){
   return {scorers:rows,source:'LaLiga official website',season:year};
 }
 
-export default async function handler(req,res){res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Access-Control-Allow-Methods','GET, OPTIONS');if(req.method==='OPTIONS')return res.status(204).end();if(req.method!=='GET')return res.status(405).json({error:'Method not allowed'});const{competition:code,resource}=req.query||{},c=LEAGUES[code];if(!c||!RESOURCES.has(resource))return res.status(400).json({error:'Unsupported competition or resource.'});if(code==='PD'){try{const result=await laLiga(resource);res.setHeader('Cache-Control','s-maxage='+TTL[resource]+', stale-while-revalidate='+(TTL[resource]*2));return res.status(200).json(result);}catch(e){return res.status(502).json({error:'LaLiga data source could not be reached.',details:e.message,source:'LaLiga official website'});}}const errors=[];let result=null;try{try{result=await espn(c,resource);}catch(e){errors.push('ESPN: '+e.message);}if(!result){try{result=await apiSports(c,code,resource);const count=result.matches?.length??result.standings?.[0]?.table?.length??result.scorers?.length??0;if(!count)result=null;}catch(e){errors.push('API-Football: '+e.message);}}if(!result&&['matches','standings'].includes(resource)){try{result=await openFootball(c,resource);}catch(e){errors.push('OpenFootball: '+e.message);}}if(result&&errors.length){result.diagnostics=errors;result.fallbackReason='A higher-priority source did not return usable data.';}if(!result){const empty=resource==='matches'?{matches:[]}:resource==='standings'?{standings:[{table:[]}]}:{scorers:[]};result={...empty,source:'none',unavailable:'No compatible data was returned by available sources.',diagnostics:errors};}res.setHeader('Cache-Control','s-maxage='+TTL[resource]+', stale-while-revalidate='+(TTL[resource]*2));return res.status(200).json(result);}catch(e){return res.status(502).json({error:'Football data sources could not be reached.',details:e.message});}}
+export default async function handler(req,res){
+  res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Access-Control-Allow-Methods','GET, OPTIONS');
+  if(req.method==='OPTIONS')return res.status(204).end();
+  if(req.method!=='GET')return res.status(405).json({error:'Method not allowed'});
+  const{competition:code,resource}=req.query||{},c=LEAGUES[code];
+  if(!c||!RESOURCES.has(resource))return res.status(400).json({error:'Unsupported competition or resource.'});
+  try{
+    let result;
+    if(code==='PD')result=await laLiga(resource);
+    else if(code==='PL')result=await premierLeague(resource);
+    else if(code==='SA')result=await serieA(resource);
+    else if(code==='BL1')result=await bundesliga(resource);
+    else if(['CL','FL1'].includes(code)){
+      if(!['matches','standings'].includes(resource))throw Error('Player statistics are not yet connected to a verified source for this competition.');
+      result=await openFootball(c,resource);
+    }
+    const count=result.matches?.length??result.standings?.[0]?.table?.length??result.scorers?.length??0;
+    if(!count)throw Error('The selected source returned no data for this request.');
+    res.setHeader('Cache-Control','s-maxage='+TTL[resource]+', stale-while-revalidate='+(TTL[resource]*2));
+    return res.status(200).json(result);
+  }catch(e){
+    const empty=resource==='matches'?{matches:[]}:resource==='standings'?{standings:[{table:[]}]}:{scorers:[]};
+    return res.status(502).json({...empty,source:'none',unavailable:'No verified data was returned by the selected competition source.',details:e.message});
+  }
+};
